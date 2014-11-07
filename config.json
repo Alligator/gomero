@@ -1,0 +1,6 @@
+{
+    "name": "gomero",
+    "socket": "/tmp/gomero.sock",
+    "host": "irc.synirc.net:6667",
+    "prefix": "."
+}
