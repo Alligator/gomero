@@ -6,10 +6,10 @@ import (
 )
 
 type Config struct {
-	Name   string
-	Socket string
-	Host   string
-	Prefix string
+	Name     string
+	Host     string
+	Channels []string
+	Prefix   string
 }
 
 func ReadConfig(path string) Config {

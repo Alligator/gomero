@@ -1,48 +1,111 @@
 package plugin
 
 import (
-	"fmt"
 	"github.com/alligator/gomero/config"
+	"github.com/alligator/gomero/db"
 	"github.com/alligator/gomero/irc"
 	ircLib "github.com/sorcix/irc"
 	"strings"
 )
 
 type Dispatcher struct {
-	Conn   *irc.IrcConn
-	Config config.Config
-	PM     *PluginManager
+	PM  *PluginManager
+	Bot Bot
 }
 
-func NewDispatcher(conn *irc.IrcConn, config config.Config) *Dispatcher {
+type Bot struct {
+	Conn   *irc.IrcConn
+	Config config.Config
+	Db     *db.Db
+}
+
+type Context struct {
+	Nick    string
+	Host    string
+	Channel string
+	Text    string
+	Message ircLib.Message
+	Bot     Bot
+}
+
+func (ctx Context) Say(message string) {
+	ctx.Bot.Conn.Inp <- ircLib.Message{
+		Command:  "PRIVMSG",
+		Params:   ctx.Message.Params,
+		Trailing: message,
+	}
+}
+
+func (ctx Context) Reply(message string) {
+	message = ctx.Nick + ": " + message
+	ctx.Bot.Conn.Inp <- ircLib.Message{
+		Command:  "PRIVMSG",
+		Params:   ctx.Message.Params,
+		Trailing: message,
+	}
+}
+
+// uugh
+func NewContext(msg ircLib.Message, cmd string, bot Bot) Context {
+	ctx := Context{}
+	ctx.Message = msg
+
+	if cmd != "" {
+		s := strings.SplitN(msg.Trailing, " ", 2)
+		if len(s) > 1 {
+			ctx.Text = s[1]
+		}
+	} else {
+		ctx.Text = msg.Trailing
+	}
+
+	ctx.Nick = msg.Prefix.Name
+	ctx.Host = msg.Prefix.Host
+	ctx.Bot = bot
+
+	if len(msg.Params) > 0 {
+		ctx.Channel = msg.Params[0]
+	}
+
+	// doing this in a closure for weird reasons
+	return ctx
+}
+
+func NewDispatcher(conn *irc.IrcConn, config config.Config, db *db.Db) *Dispatcher {
 	d := new(Dispatcher)
-	d.Conn = conn
-	d.Config = config
+	d.Bot = Bot{conn, config, db}
 	d.PM = NewPluginManager("plugin/lua")
 	go d.readLoop()
 	return d
 }
 
 func (d *Dispatcher) readLoop() {
-	for msg := range d.Conn.Out {
-		cmd := msg.Trailing
-		if strings.HasPrefix(cmd, d.Config.Prefix) {
-			go d.dispatch(msg)
-		}
+	for msg := range d.Bot.Conn.Out {
+		go d.dispatch(msg)
 	}
 }
 
 func (d *Dispatcher) dispatch(msg ircLib.Message) {
-	cmd := strings.TrimPrefix(msg.Trailing, d.Config.Prefix)
-	resp, err := d.PM.Call(cmd)
-	if err != nil {
-		fmt.Print("DISPATCH")
-		fmt.Println(err)
+	if strings.HasPrefix(msg.Trailing, d.Bot.Config.Prefix) {
+		// command
+		raw := strings.Trim(strings.TrimPrefix(msg.Trailing, d.Bot.Config.Prefix), " ")
+		sp := strings.SplitN(raw, " ", 2)
+		cmd := sp[0]
+		context := NewContext(msg, cmd, d.Bot)
+		resp, _ := d.PM.CallCommand(cmd, context, d.Bot)
+		if resp != "" {
+			d.Bot.Conn.Inp <- ircLib.Message{
+				Command:  "PRIVMSG",
+				Params:   msg.Params,
+				Trailing: resp,
+			}
+		}
 	} else {
-		d.Conn.Inp <- ircLib.Message{
-			Command:  "PRIVMSG",
-			Params:   msg.Params,
-			Trailing: resp,
+		// event
+		context := NewContext(msg, "", d.Bot)
+		respChan, _ := d.PM.CallEvent(msg.Command, context, d.Bot)
+		for resp := range respChan {
+			d.Bot.Conn.SendRaw(resp)
 		}
 	}
 }

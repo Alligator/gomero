@@ -49,7 +49,6 @@ func (ic *IrcConn) srvRecv() {
 			panic(err)
 		}
 
-		log.Println(msg.String())
 		if msg.Command == "PING" {
 			pongMsg := irc.Message{
 				Command:  "PONG",
@@ -57,6 +56,7 @@ func (ic *IrcConn) srvRecv() {
 			}
 			ic.Inp <- pongMsg
 		} else {
+			log.Printf("%s\n", msg.String())
 			ic.Out <- *msg
 		}
 	}
@@ -65,6 +65,12 @@ func (ic *IrcConn) srvRecv() {
 func (ic *IrcConn) srvSend() {
 	for msg := range ic.Inp {
 		ic.Conn.Encode(&msg)
-		log.Printf(">>> %s\n", msg.String())
+		if msg.Command != "PONG" {
+			log.Printf(">>> %s\n", msg.String())
+		}
 	}
+}
+
+func (ic *IrcConn) SendRaw(raw string) {
+	ic.Inp <- *irc.ParseMessage(raw)
 }

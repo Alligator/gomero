@@ -1,24 +1,34 @@
 package plugin
 
 import (
-	"fmt"
+	"errors"
 	lua "github.com/aarzilli/golua/lua"
 	"github.com/stevedonovan/luar"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 type PluginManager struct {
-	Plugins map[string]*luar.LuaObject
-	Files   map[string]time.Time
-	L       *lua.State
+	Commands map[string]Plugin
+	Events   map[string]map[string]Plugin
+	Files    map[string]time.Time
+	L        *lua.State
 }
 
-func (PM *PluginManager) Call(name string) (response string, err error) {
-	fn := *PM.Plugins[name]
-	resp, err := fn.Call()
-	fmt.Printf("PLUGIN CALL %#v\n", resp)
+type Plugin struct {
+	name string
+	fn   *luar.LuaObject
+}
+
+func (PM *PluginManager) CallCommand(name string, ctx Context, bot Bot) (response string, err error) {
+	fn := PM.Commands[name].fn
+	if fn == nil {
+		return "", errors.New("no command named " + name)
+	}
+	resp, err := fn.Call(ctx.Text, ctx, bot)
 	if err != nil {
 		return "", err
 	}
@@ -26,12 +36,31 @@ func (PM *PluginManager) Call(name string) (response string, err error) {
 	return r, nil
 }
 
+func (PM *PluginManager) CallEvent(event string, ctx Context, bot Bot) (responses chan string, err error) {
+	responses = make(chan string)
+	go func() {
+		for _, plug := range PM.Events[event] {
+			fn := plug.fn
+			if fn == nil {
+				continue
+			}
+			resp, err := fn.Call(ctx.Text, ctx, bot)
+			if err != nil {
+				continue
+			}
+			if resp != nil {
+				responses <- resp.(string)
+			}
+		}
+	}()
+	return responses, nil
+}
+
 func (PM *PluginManager) loadPlugin(path string) {
-	fmt.Printf("loaded %s\n", path)
+	log.Printf("loaded %s\n", path)
 	err := PM.L.DoFile(path)
 	if err != nil {
-		fmt.Print("LUA ")
-		fmt.Println(err)
+		log.Printf("!!! %s: %s\n", path, err.Error())
 	}
 }
 
@@ -39,31 +68,30 @@ func (PM *PluginManager) watchDirectory(directory string) {
 	for {
 		dir, err := os.Open(directory)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			return
 		}
 		files, err := dir.Readdir(0)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			return
 		}
 
 		for _, f := range files {
 			path := filepath.Join(directory, f.Name())
-			fh, err := os.Open(path)
+			stat, err := os.Stat(path)
 			if err != nil {
-				fmt.Println(err)
+				log.Println(err)
 				continue
 			}
-			stat, _ := fh.Stat()
 			mtime := stat.ModTime()
 			if oldMtime, ok := PM.Files[path]; ok {
 				if oldMtime.Before(mtime) {
-					go PM.loadPlugin(path)
+					PM.loadPlugin(path)
 					PM.Files[path] = mtime
 				}
 			} else {
-				go PM.loadPlugin(path)
+				PM.loadPlugin(path)
 				PM.Files[path] = mtime
 			}
 		}
@@ -72,22 +100,45 @@ func (PM *PluginManager) watchDirectory(directory string) {
 	}
 }
 
-func NewPluginManager(directory string) *PluginManager {
-	PM := new(PluginManager)
-
-	PM.Plugins = make(map[string]*luar.LuaObject)
-	PM.Files = make(map[string]time.Time)
+func (PM *PluginManager) initLua() {
 	PM.L = luar.Init()
-
 	luar.RawRegister(PM.L, "", luar.Map{
-		"RegisterPlugin": func(L *lua.State) int {
+		"RegisterCommand": func(L *lua.State) int {
 			name := L.ToString(1)
 			fn := luar.NewLuaObject(L, 2)
-			PM.Plugins[name] = fn
-			fmt.Println("  " + name + " registered")
+			PM.Commands[name] = Plugin{name, fn}
+			log.Printf("    %-10s command\n", name)
+			return 0
+		},
+		"RegisterEvent": func(L *lua.State) int {
+			name := L.ToString(1)
+			event := L.ToString(2)
+			fn := luar.NewLuaObject(L, 3)
+			if _, ok := PM.Events[event]; !ok {
+				PM.Events[event] = make(map[string]Plugin)
+			}
+			PM.Events[event][name] = Plugin{name, fn}
+			log.Printf("    %-10s event\n", name)
 			return 0
 		},
 	})
+
+	luar.Register(PM.L, "go", luar.Map{
+		"Split":  strings.Split,
+		"SplitN": strings.SplitN,
+		"PrintTable": func(table interface{}) {
+			log.Printf("%#v\n", table)
+		},
+	})
+}
+
+func NewPluginManager(directory string) *PluginManager {
+	PM := new(PluginManager)
+
+	PM.Commands = make(map[string]Plugin)
+	PM.Events = make(map[string]map[string]Plugin)
+	PM.Files = make(map[string]time.Time)
+	PM.initLua()
 
 	go PM.watchDirectory(directory)
 	return PM

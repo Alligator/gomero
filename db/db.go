@@ -2,11 +2,15 @@ package db
 
 type Db map[string]interface{}
 
-func (db Db) Get(key string, reply *interface{}) error {
-	*reply = db[key]
-	return nil
+func (db Db) Get(key string) interface{} {
+	return db[key]
 }
 
-func NewDb() Db {
-	return make(Db)
+func (db Db) Set(key string, value interface{}) interface{} {
+	db[key] = value
+	return value
+}
+
+func NewDb() *Db {
+	return new(Db)
 }

@@ -5,25 +5,22 @@ import (
 	"github.com/alligator/gomero/db"
 	"github.com/alligator/gomero/irc"
 	"github.com/alligator/gomero/plugin"
-	ircLib "github.com/sorcix/irc"
+	"log"
+	"os"
 	"time"
 )
 
 func main() {
+	log.SetOutput(os.Stdout)
+	log.SetFlags(log.Ltime)
+
 	config := config.ReadConfig("config.json")
 
-	db := db.NewDb()
-	db = db
 	ircConn := irc.NewIrcConn(config.Host)
+	db := db.NewDb()
 
 	ircConn.Dial()
-	_ = plugin.NewDispatcher(ircConn, config)
-
-	time.Sleep(8 * time.Second)
-	ircConn.Inp <- ircLib.Message{
-		Command:  "JOIN",
-		Trailing: "#sa-minecraft",
-	}
+	_ = plugin.NewDispatcher(ircConn, config, db)
 
 	for {
 		time.Sleep(1 * time.Second)
