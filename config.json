@@ -1,6 +1,0 @@
-{
-    "name": "gomero",
-    "host": "irc.synirc.net:6667",
-    "channels": ["#flf"],
-    "prefix": "!"
-}

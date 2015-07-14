@@ -1,10 +1,13 @@
 package plugin
 
 import (
+	"encoding/json"
 	"errors"
 	lua "github.com/aarzilli/golua/lua"
 	"github.com/stevedonovan/luar"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,15 +15,20 @@ import (
 )
 
 type PluginManager struct {
-	Commands map[string]Plugin
-	Events   map[string]map[string]Plugin
-	Files    map[string]time.Time
-	L        *lua.State
+	Commands  map[string]LuaPlugin
+	Events    map[string]map[string]LuaPlugin
+	Files     map[string]time.Time
+	GoPlugins map[string]GoPlugin
+	L         *lua.State
 }
 
-type Plugin struct {
+type LuaPlugin struct {
 	name string
 	fn   *luar.LuaObject
+}
+
+type GoPlugin interface {
+	init(bot Bot)
 }
 
 func (PM *PluginManager) CallCommand(name string, ctx Context, bot Bot) (response string, err error) {
@@ -78,6 +86,9 @@ func (PM *PluginManager) watchDirectory(directory string) {
 		}
 
 		for _, f := range files {
+			if !strings.HasSuffix(f.Name(), "lua") {
+				continue
+			}
 			path := filepath.Join(directory, f.Name())
 			stat, err := os.Stat(path)
 			if err != nil {
@@ -106,7 +117,7 @@ func (PM *PluginManager) initLua() {
 		"RegisterCommand": func(L *lua.State) int {
 			name := L.ToString(1)
 			fn := luar.NewLuaObject(L, 2)
-			PM.Commands[name] = Plugin{name, fn}
+			PM.Commands[name] = LuaPlugin{name, fn}
 			log.Printf("    %-10s command\n", name)
 			return 0
 		},
@@ -115,9 +126,9 @@ func (PM *PluginManager) initLua() {
 			event := L.ToString(2)
 			fn := luar.NewLuaObject(L, 3)
 			if _, ok := PM.Events[event]; !ok {
-				PM.Events[event] = make(map[string]Plugin)
+				PM.Events[event] = make(map[string]LuaPlugin)
 			}
-			PM.Events[event][name] = Plugin{name, fn}
+			PM.Events[event][name] = LuaPlugin{name, fn}
 			log.Printf("    %-10s event\n", name)
 			return 0
 		},
@@ -129,16 +140,53 @@ func (PM *PluginManager) initLua() {
 		"PrintTable": func(table interface{}) {
 			log.Printf("%#v\n", table)
 		},
+		"GetHTTP": func(url string) string {
+			resp, err := http.Get(url)
+			if err != nil {
+				return ""
+			}
+			defer resp.Body.Close()
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				return ""
+			}
+			return string(body)
+		},
+		"GetJSON": func(url string) luar.Map {
+			resp, err := http.Get(url)
+			if err != nil {
+				return nil
+			}
+			defer resp.Body.Close()
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				return nil
+			}
+			var js luar.Map
+			json.Unmarshal(body, &js)
+			return js
+		},
 	})
 }
 
-func NewPluginManager(directory string) *PluginManager {
+func (PM *PluginManager) initGo(bot Bot) {
+	for _, v := range PM.GoPlugins {
+		go v.init(bot)
+	}
+}
+
+func NewPluginManager(directory string, bot Bot) *PluginManager {
 	PM := new(PluginManager)
 
-	PM.Commands = make(map[string]Plugin)
-	PM.Events = make(map[string]map[string]Plugin)
+	PM.Commands = make(map[string]LuaPlugin)
+	PM.Events = make(map[string]map[string]LuaPlugin)
 	PM.Files = make(map[string]time.Time)
+	PM.GoPlugins = make(map[string]GoPlugin)
+
+	PM.GoPlugins["http"] = new(HttpServerPlugin)
+
 	PM.initLua()
+	PM.initGo(bot)
 
 	go PM.watchDirectory(directory)
 	return PM

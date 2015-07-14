@@ -19,32 +19,6 @@ type Bot struct {
 	Db     *db.Db
 }
 
-type Context struct {
-	Nick    string
-	Host    string
-	Channel string
-	Text    string
-	Message ircLib.Message
-	Bot     Bot
-}
-
-func (ctx Context) Say(message string) {
-	ctx.Bot.Conn.Inp <- ircLib.Message{
-		Command:  "PRIVMSG",
-		Params:   ctx.Message.Params,
-		Trailing: message,
-	}
-}
-
-func (ctx Context) Reply(message string) {
-	message = ctx.Nick + ": " + message
-	ctx.Bot.Conn.Inp <- ircLib.Message{
-		Command:  "PRIVMSG",
-		Params:   ctx.Message.Params,
-		Trailing: message,
-	}
-}
-
 // uugh
 func NewContext(msg ircLib.Message, cmd string, bot Bot) Context {
 	ctx := Context{}
@@ -67,14 +41,13 @@ func NewContext(msg ircLib.Message, cmd string, bot Bot) Context {
 		ctx.Channel = msg.Params[0]
 	}
 
-	// doing this in a closure for weird reasons
 	return ctx
 }
 
 func NewDispatcher(conn *irc.IrcConn, config config.Config, db *db.Db) *Dispatcher {
 	d := new(Dispatcher)
 	d.Bot = Bot{conn, config, db}
-	d.PM = NewPluginManager("plugin/lua")
+	d.PM = NewPluginManager("plugin/lua", d.Bot)
 	go d.readLoop()
 	return d
 }

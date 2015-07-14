@@ -14,7 +14,11 @@ func main() {
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.Ltime)
 
-	config := config.ReadConfig("config.json")
+	config, err := config.ReadConfig("config.json")
+	if err != nil {
+		log.Printf("config parse error: %s\n", err.Error())
+		return
+	}
 
 	ircConn := irc.NewIrcConn(config.Host)
 	db := db.NewDb()

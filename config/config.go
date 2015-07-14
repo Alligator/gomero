@@ -10,12 +10,15 @@ type Config struct {
 	Host     string
 	Channels []string
 	Prefix   string
+	ApiKeys  map[string]string
 }
 
-func ReadConfig(path string) Config {
+func ReadConfig(path string) (Config, error) {
 	var config Config
 	data, err := ioutil.ReadFile(path)
 	err = json.Unmarshal(data, &config)
-	err = err
-	return config
+	if err != nil {
+		return config, err
+	}
+	return config, nil
 }
