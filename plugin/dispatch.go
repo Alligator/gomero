@@ -38,7 +38,11 @@ func NewContext(msg ircLib.Message, cmd string, bot Bot) Context {
 	ctx.Bot = bot
 
 	if len(msg.Params) > 0 {
-		ctx.Channel = msg.Params[0]
+		if strings.HasPrefix(msg.Params[0], "#") {
+			ctx.Channel = msg.Params[0]
+		} else {
+			ctx.Channel = ctx.Nick
+		}
 	}
 
 	return ctx
@@ -76,9 +80,11 @@ func (d *Dispatcher) dispatch(msg ircLib.Message) {
 	} else {
 		// event
 		context := NewContext(msg, "", d.Bot)
-		respChan, _ := d.PM.CallEvent(msg.Command, context, d.Bot)
-		for resp := range respChan {
-			d.Bot.Conn.SendRaw(resp)
+		respChan, err := d.PM.CallEvent(msg.Command, context, d.Bot)
+		if err == nil {
+			for resp := range respChan {
+				d.Bot.Conn.SendRaw(resp)
+			}
 		}
 	}
 }

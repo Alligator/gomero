@@ -28,10 +28,15 @@ type LuaPlugin struct {
 }
 
 type GoPlugin interface {
-	init(bot Bot)
+	Init(bot Bot)
+	Message(name string, ctx Context, bot Bot)
 }
 
 func (PM *PluginManager) CallCommand(name string, ctx Context, bot Bot) (response string, err error) {
+	for _, goplug := range PM.GoPlugins {
+		go goplug.Message(name, ctx, bot)
+	}
+
 	fn := PM.Commands[name].fn
 	if fn == nil {
 		return "", errors.New("no command named " + name)
@@ -46,6 +51,9 @@ func (PM *PluginManager) CallCommand(name string, ctx Context, bot Bot) (respons
 
 func (PM *PluginManager) CallEvent(event string, ctx Context, bot Bot) (responses chan string, err error) {
 	responses = make(chan string)
+  if _, ok := PM.Events[event]; !ok {
+    return responses, errors.New("no event")
+  }
 	go func() {
 		for _, plug := range PM.Events[event] {
 			fn := plug.fn
@@ -171,7 +179,7 @@ func (PM *PluginManager) initLua() {
 
 func (PM *PluginManager) initGo(bot Bot) {
 	for _, v := range PM.GoPlugins {
-		go v.init(bot)
+		go v.Init(bot)
 	}
 }
 

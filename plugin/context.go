@@ -25,7 +25,7 @@ func (ctx Context) Reply(message string) {
 	message = ctx.Nick + ": " + message
 	ctx.Bot.Conn.Inp <- ircLib.Message{
 		Command:  "PRIVMSG",
-		Params:   ctx.Message.Params,
+		Params:   []string{ctx.Channel},
 		Trailing: message,
 	}
 }

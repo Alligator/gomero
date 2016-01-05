@@ -3,6 +3,7 @@ package irc
 import (
 	"github.com/sorcix/irc"
 	"log"
+	"time"
 )
 
 type IrcConn struct {
@@ -20,7 +21,7 @@ func NewIrcConn(host string) *IrcConn {
 	return ic
 }
 
-func (ic *IrcConn) Dial() {
+func (ic *IrcConn) Dial(name string) {
 	conn, err := irc.Dial(ic.Host)
 	if err != nil {
 		return
@@ -32,12 +33,12 @@ func (ic *IrcConn) Dial() {
 
 	ic.Inp <- irc.Message{
 		Command:  "NICK",
-		Trailing: "gomero",
+		Trailing: name,
 	}
 	ic.Inp <- irc.Message{
 		Command:  "USER",
-		Params:   []string{"gomero", "3", "*"},
-		Trailing: "gomero",
+		Params:   []string{name, "3", "*"},
+		Trailing: name,
 	}
 }
 
@@ -63,7 +64,15 @@ func (ic *IrcConn) srvRecv() {
 }
 
 func (ic *IrcConn) srvSend() {
+	burstLimiter := make(chan time.Time, 5)
+	go func() {
+		for t := range time.Tick(time.Second * 2) {
+			burstLimiter <- t
+		}
+	}()
+
 	for msg := range ic.Inp {
+		<-burstLimiter
 		ic.Conn.Encode(&msg)
 		if msg.Command != "PONG" {
 			log.Printf(">>> %s\n", msg.String())

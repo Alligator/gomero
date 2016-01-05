@@ -23,7 +23,7 @@ func main() {
 	ircConn := irc.NewIrcConn(config.Host)
 	db := db.NewDb()
 
-	ircConn.Dial()
+	ircConn.Dial(config.Name)
 	_ = plugin.NewDispatcher(ircConn, config, db)
 
 	for {
